@@ -17,6 +17,9 @@ so it works **from anywhere with an internet connection**, not just on your home
   bar icon or the global shortcut **⌃⌥V**.
 - **SD-card recordings** — a 24-hour timeline (motion / alarm / normal colour-coded),
   clip list, seek, and **1×–32×** playback (16×/32× scan by keyframes).
+- **Download a clip** — save any part of a recording (15s / 30s / 1m / 5m from the current
+  position, or to the end) to a standard **.mp4**. No re-encoding: the camera's H.264/H.265
+  is copied through, so it's fast and lossless.
 - **Digital zoom & pan** on both live and recordings — pinch or scroll to zoom, drag to
   pan, double-click to reset.
 - **PTZ** (pan/tilt) with a press-and-hold d-pad, for cameras that have motors.

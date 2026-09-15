@@ -12,6 +12,9 @@ final class AnnexBConverter {
     private var parameterSets: [[UInt8]] = []
     private var waitingForKeyFrame = true
 
+    /// The decoded stream format (available after the first keyframe) — needed to set up an MP4 writer.
+    var formatDescription: CMVideoFormatDescription? { format }
+
     func reset() {
         format = nil; parameterSets = []; waitingForKeyFrame = true
     }
@@ -47,7 +50,8 @@ final class AnnexBConverter {
         return nil
     }
 
-    func sampleBuffer(from annexB: [UInt8], isKeyFrame: Bool) -> CMSampleBuffer? {
+    /// `timing` is nil for live display (shown immediately); set it when writing to a file so the MP4 has a timeline.
+    func sampleBuffer(from annexB: [UInt8], isKeyFrame: Bool, timing: CMSampleTimingInfo? = nil) -> CMSampleBuffer? {
         let units = Self.nalUnits(annexB)
         if codec == nil { codec = Self.detectCodec(units) }
         guard let codec else { return nil }
@@ -95,14 +99,16 @@ final class AnnexBConverter {
 
         var sample: CMSampleBuffer?
         var size = payload.count
+        var timingArray = timing.map { [$0] } ?? []
         guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
-                                        sampleCount: 1, sampleTimingEntryCount: 0, sampleTimingArray: nil,
+                                        sampleCount: 1, sampleTimingEntryCount: timing == nil ? 0 : 1,
+                                        sampleTimingArray: &timingArray,
                                         sampleSizeEntryCount: 1, sampleSizeArray: &size,
                                         sampleBufferOut: &sample) == noErr, let sample else { return nil }
 
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? [NSMutableDictionary],
            let first = attachments.first {
-            first[kCMSampleAttachmentKey_DisplayImmediately] = true
+            if timing == nil { first[kCMSampleAttachmentKey_DisplayImmediately] = true } // live display only
             first[kCMSampleAttachmentKey_NotSync] = !key
         }
         return sample

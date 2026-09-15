@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import V380
 
 struct RecordingsView: View {
@@ -34,6 +36,10 @@ struct RecordingsView: View {
 
                 Spacer(minLength: 0)
                 transportBar
+            }
+
+            if playback.exportState != .idle {
+                ExportOverlay(playback: playback)
             }
         }
     }
@@ -97,6 +103,21 @@ struct RecordingsView: View {
                 Spacer()
 
                 Menu {
+                    Section("Save from here as .mp4") {
+                        Button("Next 15 seconds") { startExport(15) }
+                        Button("Next 30 seconds") { startExport(30) }
+                        Button("Next 1 minute") { startExport(60) }
+                        Button("Next 5 minutes") { startExport(300) }
+                        Button("To end of this recording") { startExport(nil) }
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.down").frame(width: 22, height: 18)
+                }
+                .menuStyle(.borderlessButton).fixedSize().foregroundStyle(.white)
+                .help("Download a clip from the current position")
+                .disabled(playback.current == nil)
+
+                Menu {
                     ForEach([1.0, 2.0, 4.0, 8.0, 16.0, 32.0], id: \.self) { s in
                         Button("\(Int(s))×") { playback.setSpeed(s) }
                     }
@@ -113,6 +134,55 @@ struct RecordingsView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.black.opacity(0.6))
+    }
+
+    /// Opens a save dialog and exports `seconds` from the current position (nil = to the end of the recording).
+    private func startExport(_ seconds: UInt32?) {
+        guard let seg = playback.current else { return }
+        let start = playback.position
+        let duration = seconds ?? (seg.end > start ? seg.end - start : 0)
+        guard duration > 0 else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.mpeg4Movie]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "OpenV380 \(PlaybackController.timeString(start).replacingOccurrences(of: ":", with: "-")).mp4"
+        if panel.runModal() == .OK, let url = panel.url {
+            playback.exportClip(from: start, duration: duration, to: url)
+        }
+    }
+}
+
+/// Progress / result of a clip download, shown over the recordings view.
+struct ExportOverlay: View {
+    @ObservedObject var playback: PlaybackController
+
+    var body: some View {
+        VStack(spacing: 12) {
+            switch playback.exportState {
+            case .running(let p):
+                ProgressView(value: p).frame(width: 240).tint(.white)
+                Text("Saving clip… \(Int(p * 100))%").font(.callout).foregroundStyle(.white)
+                Button("Cancel") { playback.cancelExport() }
+            case .done(let url):
+                Label("Clip saved", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.headline)
+                Text(url.lastPathComponent).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                HStack {
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]); playback.dismissExport() }
+                    Button("Done") { playback.dismissExport() }.keyboardShortcut(.defaultAction)
+                }
+            case .failed(let message):
+                Label("Couldn't save the clip", systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.headline)
+                Text(message).font(.caption).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center)
+                Button("OK") { playback.dismissExport() }.keyboardShortcut(.defaultAction)
+            case .idle:
+                EmptyView()
+            }
+        }
+        .padding(22)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.45))
     }
 }
 

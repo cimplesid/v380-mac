@@ -21,9 +21,18 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var position: UInt32 = 0
     @Published private(set) var speed: Double = 1
 
+    enum ExportState: Equatable {
+        case idle
+        case running(Double)          // 0…1 progress
+        case done(URL)
+        case failed(String)
+    }
+    @Published private(set) var exportState: ExportState = .idle
+
     let renderer = VideoRenderer()
     let audio = AudioPlayer()
     var config: CameraConfig?
+    private var exporter: ClipExporter?
 
     private let lock = NSLock()
     private var generation = 0
@@ -166,6 +175,44 @@ final class PlaybackController: ObservableObject {
         renderer.clear()
         state = .idle
     }
+
+    // MARK: - Export a clip
+
+    /// Saves `[start, start+duration)` of the current recording to `url` as an .mp4.
+    func exportClip(from start: UInt32, duration: UInt32, to url: URL) {
+        guard let config, let segment = current else { return }
+        let end = min(start &+ duration, segment.end)
+        guard end > start else { return }
+        stop() // free the camera's connection slot for the export
+
+        exportState = .running(0)
+        let exp = ClipExporter(config: config)
+        exporter = exp
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            exp.export(segment, from: start, to: end, url: url,
+                       progress: { p in self?.exportState = .running(p) },
+                       completion: { result in
+                           switch result {
+                           case .success(let saved): self?.exportState = .done(saved)
+                           case .failure(let error): self?.exportState = .failed(error.localizedDescription)
+                           }
+                           self?.exporter = nil
+                       })
+        }
+    }
+
+    /// Exports a specific segment (sets it current first). Used by the UI's "export from here" and tests.
+    func exportSegment(_ segment: RecordingSegment, from start: UInt32, duration: UInt32, to url: URL) {
+        current = segment
+        exportClip(from: start, duration: duration, to: url)
+    }
+
+    func cancelExport() {
+        exporter?.cancel(); exporter = nil
+        exportState = .idle
+    }
+
+    func dismissExport() { exportState = .idle }
 
     private func stopThread() {
         lock.lock()
