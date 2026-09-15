@@ -25,15 +25,6 @@ so it works **from anywhere with an internet connection**, not just on your home
 - **Credentials stored in the macOS Keychain** — nothing is written to disk in plaintext,
   and video is never saved to disk (it streams into memory only).
 
-## Screenshot
-
-<p align="center">
-  <img src="docs/app.png" width="70%" alt="OpenV380">
-</p>
-
-(See [docs/screenshots.md](docs/screenshots.md) for how to capture a screenshot without
-exposing a real camera feed.)
-
 ## Download
 
 Grab `OpenV380.app` from the [Releases](../../releases) page, or build from source below.
