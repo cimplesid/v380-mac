@@ -27,16 +27,13 @@ so it works **from anywhere with an internet connection**, not just on your home
 
 ## Screenshots
 
-_Coming soon._ Screenshots live in [`docs/`](docs/) — see
-[docs/screenshots.md](docs/screenshots.md) for how to capture them without exposing a real
-camera feed.
-
-<!-- Once added:
 <p align="center">
   <img src="docs/live.png" width="45%" alt="Live view">
   <img src="docs/recordings.png" width="45%" alt="Recordings timeline">
 </p>
--->
+
+(See [docs/screenshots.md](docs/screenshots.md) for how these are captured without exposing
+a real camera feed.)
 
 ## Download
 
@@ -96,6 +93,18 @@ On the camera tested, recorded audio is encrypted silence (the camera stores no 
 the SD card), and live audio is encrypted with a key that isn't the video key. OpenV380
 plays audio when it can decode it and stays silent (rather than blasting static) when it
 can't. Cracking live-audio encryption is an open item.
+
+## Troubleshooting
+
+**Login fails, "wrong password", or it's stuck on "camera appears offline" (code 1002):**
+newer V380 cameras are assigned a *random device password* that only the V380 Pro app
+knows, so you often have to set your own first. In **V380 Pro → the gear icon on the camera
+→ Password → Change Device Password**, set a password you know, then enter that in OpenV380.
+
+- This is the camera's own **device password**, not your V380 **account** password.
+- Leave **Username** as your **Device ID** — OpenV380 detects the right one automatically.
+- Over the cloud relay, a wrong username or password is reported as code `1002`, which can
+  look like the camera is offline even when it isn't.
 
 ## Credits
 
