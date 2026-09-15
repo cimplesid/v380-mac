@@ -1,7 +1,12 @@
 #!/bin/zsh
-# Builds OpenV380.app and installs it to ~/Applications.
+# Builds OpenV380.app.
+#   ./build-app.sh           dev:     sign with your local Apple Development cert and install to ~/Applications
+#   ./build-app.sh release   release: ad-hoc sign (no personal identity) and zip for GitHub Releases
 set -euo pipefail
 cd "$(dirname "$0")"
+
+MODE="${1:-dev}"
+VERSION="1.0"
 
 swift build -c release --product OpenV380
 
@@ -42,11 +47,20 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# A stable signing identity keeps the Keychain item trusted across rebuilds (ad-hoc signatures change every build).
-IDENTITY=$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2; exit}')
-codesign --force --deep --options runtime --sign "${IDENTITY:--}" "$APP"
-
-mkdir -p ~/Applications
-rm -rf ~/Applications/OpenV380.app
-cp -R "$APP" ~/Applications/OpenV380.app
-echo "Installed ~/Applications/OpenV380.app"
+if [ "$MODE" = "release" ]; then
+    # Ad-hoc signature: no Apple Developer identity is embedded, so nothing personal ships in the binary.
+    codesign --force --deep --options runtime --sign - "$APP"
+    ZIP="build/OpenV380-$VERSION.zip"
+    rm -f "$ZIP"
+    ditto -c -k --keepParent "$APP" "$ZIP"
+    echo "Created $ZIP"
+    echo "Upload it on the repo's Releases page. It is not notarized, so first launch is right-click → Open."
+else
+    # A stable Apple Development identity keeps the Keychain item trusted across local rebuilds.
+    IDENTITY=$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2; exit}')
+    codesign --force --deep --options runtime --sign "${IDENTITY:--}" "$APP"
+    mkdir -p ~/Applications
+    rm -rf ~/Applications/OpenV380.app
+    cp -R "$APP" ~/Applications/OpenV380.app
+    echo "Installed ~/Applications/OpenV380.app"
+fi

@@ -25,6 +25,26 @@ so it works **from anywhere with an internet connection**, not just on your home
 - **Credentials stored in the macOS Keychain** — nothing is written to disk in plaintext,
   and video is never saved to disk (it streams into memory only).
 
+## Screenshots
+
+_Coming soon._ Screenshots live in [`docs/`](docs/) — see
+[docs/screenshots.md](docs/screenshots.md) for how to capture them without exposing a real
+camera feed.
+
+<!-- Once added:
+<p align="center">
+  <img src="docs/live.png" width="45%" alt="Live view">
+  <img src="docs/recordings.png" width="45%" alt="Recordings timeline">
+</p>
+-->
+
+## Download
+
+Grab `OpenV380.app` from the [Releases](../../releases) page, or build from source below.
+The release build is ad-hoc signed (not notarized), so on first launch **right-click the
+app → Open** to get past Gatekeeper. It contains no credentials — those live only in your
+Keychain, entered on first run.
+
 ## Requirements
 
 - macOS 13 or later
@@ -38,8 +58,14 @@ so it works **from anywhere with an internet connection**, not just on your home
 ./build-app.sh
 ```
 
-This builds a release binary, wraps it in `OpenV380.app`, ad-hoc code-signs it, and copies
-it to `~/Applications/OpenV380.app`. Launch it from there (it lives in the menu bar).
+This builds a release binary, wraps it in `OpenV380.app`, signs it, and copies it to
+`~/Applications/OpenV380.app`. Launch it from there (it lives in the menu bar).
+
+To build a distributable, ad-hoc-signed zip for a GitHub release instead:
+
+```sh
+./build-app.sh release      # writes build/OpenV380-<version>.zip
+```
 
 On first launch, enter your **Device ID** and **device password**. They're saved to the
 Keychain; you never enter them again.
