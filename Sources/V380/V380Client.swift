@@ -26,7 +26,10 @@ public enum V380Error: Error, CustomStringConvertible {
         case .wrongPassword: return "wrong camera password"
         case .wrongUsername: return "wrong camera username"
         case .wrongDeviceId: return "wrong device ID"
-        case .loginFailed(let c): return "camera refused login (code \(c))"
+        case .loginFailed(let c):
+            // 1002 comes from the cloud relay, not the camera's credential check — the device is unreachable.
+            if c == 1002 { return "camera appears offline (V380's cloud can't reach it right now)" }
+            return "camera refused login (code \(c))"
         case .streamRefused(let c): return "camera refused the stream (code \(c))"
         }
     }
@@ -167,13 +170,20 @@ public final class V380Session {
                     } catch V380Error.badResponse(let detail) {
                         lastError = V380Error.badResponse(detail)
                         continue versionLoop
+                    } catch V380Error.loginFailed(let code) {
+                        // e.g. relay 1002: unclear which field is at fault, so keep trying every variant.
+                        lastError = V380Error.loginFailed(code)
+                        continue
                     }
                 }
                 // Every password encoding was refused for this username; another username will not help.
                 if case V380Error.wrongPassword = lastError { break versionLoop }
             }
-            // The header was understood (the camera judged the credentials), so the other version won't help.
-            if case V380Error.badResponse = lastError { continue } else { break }
+            // On a bad-header or unroutable (e.g. 1002) reply, still try the other header version.
+            switch lastError {
+            case V380Error.badResponse, V380Error.loginFailed: continue
+            default: break versionLoop
+            }
         }
         throw lastError
     }

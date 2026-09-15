@@ -83,14 +83,7 @@ final class LiveController: ObservableObject {
             lock.unlock()
 
             do {
-                do {
-                    try s.authenticateAnywhere(shouldStop: { !self.current(gen) })
-                } catch let error as V380Error {
-                    // The camera answered and refused; retrying the same login only hammers it.
-                    Diag.log("live login refused: \(error)")
-                    setState(.failed(error.description.capitalizedFirst), gen: gen)
-                    break
-                }
+                try s.authenticateAnywhere(shouldStop: { !self.current(gen) })
                 guard current(gen) else { break }
                 setState(.connecting("Starting video…"), gen: gen)
                 let info = try s.startLive()
@@ -124,10 +117,12 @@ final class LiveController: ObservableObject {
                         }
                     }
                 }
-            } catch let error as V380Error where error.isFatal {
+            } catch let error as V380Error where error.isCredentialError {
+                // Only wrong username/password/device ID is worth stopping for; everything else can recover.
                 setState(.failed(error.description.capitalizedFirst), gen: gen)
                 break
             } catch {
+                // Offline / 1002 / dropped stream: keep retrying so it reconnects on its own.
                 guard current(gen) else { break }
                 attempt += 1
                 Diag.log("live connection error: \(error)")
@@ -135,7 +130,7 @@ final class LiveController: ObservableObject {
             }
             s.close()
             guard current(gen) else { break }
-            Thread.sleep(forTimeInterval: min(Double(attempt), 5))
+            Thread.sleep(forTimeInterval: min(Double(attempt) * 2, 10))
         }
         lock.lock(); if gen == generation { session = nil }; lock.unlock()
     }
@@ -154,6 +149,10 @@ extension LiveController {
         }
         if case SocketError.timeout = error { return "Camera is slow to respond — retrying…" }
         if error is SocketError { return "Connection dropped — reconnecting…" }
+        if case V380Error.loginFailed(1002) = error {
+            return "Camera busy or offline — retrying…\(attempt > 2 ? " (close it in the V380 Pro app if it's open there)" : "")"
+        }
+        if case V380Error.streamRefused = error { return "Camera busy — retrying…" }
         return "Reconnecting…"
     }
 }
