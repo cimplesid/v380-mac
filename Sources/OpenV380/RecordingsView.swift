@@ -8,6 +8,7 @@ struct RecordingsView: View {
     @ObservedObject var model: AppModel
     @State private var showList = false
     @State private var zoom: CGFloat = 1
+    @State private var showBulkSheet = false
 
     var body: some View {
         ZStack {
@@ -40,6 +41,14 @@ struct RecordingsView: View {
 
             if playback.exportState != .idle {
                 ExportOverlay(playback: playback)
+            }
+            if playback.bulkState != .idle {
+                BulkOverlay(playback: playback)
+            }
+        }
+        .sheet(isPresented: $showBulkSheet) {
+            BulkSheet(defaultDay: playback.day) { from, to, folder in
+                playback.bulkDownload(fromDay: from, toDay: to, into: folder)
             }
         }
     }
@@ -108,14 +117,18 @@ struct RecordingsView: View {
                         Button("Next 30 seconds") { startExport(30) }
                         Button("Next 1 minute") { startExport(60) }
                         Button("Next 5 minutes") { startExport(300) }
+                        Button("Custom length…") { promptCustomMinutes() }
                         Button("To end of this recording") { startExport(nil) }
+                    }
+                    Section {
+                        Button("Bulk download a date range…") { showBulkSheet = true }
                     }
                 } label: {
                     Image(systemName: "square.and.arrow.down").frame(width: 22, height: 18)
                 }
                 .menuStyle(.borderlessButton).fixedSize().foregroundStyle(.white)
-                .help("Download a clip from the current position")
-                .disabled(playback.current == nil)
+                .help("Download a clip, or bulk-download a whole date range")
+                .disabled(playback.current == nil && playback.segments.isEmpty)
 
                 Menu {
                     ForEach([1.0, 2.0, 4.0, 8.0, 16.0, 32.0], id: \.self) { s in
@@ -150,6 +163,111 @@ struct RecordingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             playback.exportClip(from: start, duration: duration, to: url)
         }
+    }
+
+    /// Asks for a number of minutes (decimals allowed, e.g. 2.5) and exports that much from here.
+    private func promptCustomMinutes() {
+        let alert = NSAlert()
+        alert.messageText = "Download how many minutes?"
+        alert.informativeText = "From the current position. Decimals are fine (e.g. 2.5)."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        field.stringValue = "1"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let minutes = Double(field.stringValue.replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespaces)) ?? 0
+        let seconds = UInt32(max(0, (minutes * 60).rounded()))
+        if seconds > 0 { startExport(seconds) }
+    }
+}
+
+/// Date-range + folder chooser for a bulk download.
+struct BulkSheet: View {
+    let defaultDay: Date
+    let onStart: (Date, Date, URL) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var from: Date
+    @State private var to: Date
+
+    init(defaultDay: Date, onStart: @escaping (Date, Date, URL) -> Void) {
+        self.defaultDay = defaultDay
+        self.onStart = onStart
+        _from = State(initialValue: defaultDay)
+        _to = State(initialValue: defaultDay)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Bulk download").font(.headline)
+            Text("Saves every recording in the range as its own .mp4 into a folder you pick. This can take a while and use a lot of space.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            DatePicker("From", selection: $from, in: ...Date(), displayedComponents: .date)
+            DatePicker("To", selection: $to, in: ...Date(), displayedComponents: .date)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Choose Folder & Download…") { chooseFolderAndStart() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 380)
+    }
+
+    private func chooseFolderAndStart() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Download Here"
+        if panel.runModal() == .OK, let folder = panel.url {
+            let lo = min(from, to), hi = max(from, to)
+            onStart(lo, hi, folder)
+            dismiss()
+        }
+    }
+}
+
+/// Progress / result of a bulk download.
+struct BulkOverlay: View {
+    @ObservedObject var playback: PlaybackController
+
+    var body: some View {
+        VStack(spacing: 12) {
+            switch playback.bulkState {
+            case .running(let done, let total, let label, let fileProgress):
+                Text(total == 0 ? "Preparing…" : "Downloading \(done + 1) of \(total)")
+                    .font(.headline).foregroundStyle(.white)
+                if total > 0 {
+                    ProgressView(value: Double(done) + fileProgress, total: Double(total))
+                        .frame(width: 260).tint(.white)
+                    Text("\(label) · \(Int(fileProgress * 100))%")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                } else {
+                    ProgressView().tint(.white)
+                }
+                Button("Stop") { playback.cancelBulk() }
+            case .finished(let count, let folder):
+                Label("Downloaded \(count) clip\(count == 1 ? "" : "s")", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).font(.headline)
+                HStack {
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([folder]); playback.dismissBulk() }
+                    Button("Done") { playback.dismissBulk() }.keyboardShortcut(.defaultAction)
+                }
+            case .failed(let message):
+                Label("Bulk download failed", systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.headline)
+                Text(message).font(.caption).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center)
+                Button("OK") { playback.dismissBulk() }.keyboardShortcut(.defaultAction)
+            case .idle:
+                EmptyView()
+            }
+        }
+        .padding(22)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.45))
     }
 }
 

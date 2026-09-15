@@ -29,6 +29,25 @@ final class PlaybackController: ObservableObject {
     }
     @Published private(set) var exportState: ExportState = .idle
 
+    enum BulkState: Equatable {
+        case idle
+        case running(done: Int, total: Int, label: String, fileProgress: Double)
+        case finished(count: Int, folder: URL)
+        case failed(String)
+    }
+    @Published private(set) var bulkState: BulkState = .idle
+    private var bulkCancelled = false
+    private var bulkExporter: ClipExporter?
+
+    /// yyyy-MM-dd HH-mm-ss in UTC (camera times are wall-clock stored as UTC) — safe for filenames.
+    static let fileStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX") // true 24-hour, no AM/PM in filenames
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH-mm-ss"
+        return f
+    }()
+
     let renderer = VideoRenderer()
     let audio = AudioPlayer()
     var config: CameraConfig?
@@ -213,6 +232,74 @@ final class PlaybackController: ObservableObject {
     }
 
     func dismissExport() { exportState = .idle }
+
+    // MARK: - Bulk download (a whole date range)
+
+    /// Downloads every recording between `fromDay` and `toDay` (inclusive) into `folder`, one .mp4 each.
+    func bulkDownload(fromDay: Date, toDay: Date, into folder: URL) {
+        guard let config else { return }
+        stop()
+        bulkCancelled = false
+        bulkState = .running(done: 0, total: 0, label: "Listing recordings…", fileProgress: 0)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.runBulk(config: config, fromDay: fromDay, toDay: toDay, folder: folder)
+        }
+    }
+
+    func cancelBulk() {
+        bulkCancelled = true
+        bulkExporter?.cancel()
+    }
+
+    func dismissBulk() { bulkState = .idle }
+
+    private func setBulk(_ s: BulkState) { DispatchQueue.main.async { self.bulkState = s } }
+
+    private func runBulk(config: CameraConfig, fromDay: Date, toDay: Date, folder: URL) {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let last = cal.startOfDay(for: toDay)
+
+        // 1. Collect every segment across the day range.
+        var all: [RecordingSegment] = []
+        var day = cal.startOfDay(for: fromDay)
+        while day <= last && !bulkCancelled {
+            let c = cal.dateComponents([.year, .month, .day], from: day)
+            let s = V380Session(config: config)
+            s.log = { Diag.log("bulk \($0)") }
+            do {
+                try s.authenticateAnywhere(shouldStop: { self.bulkCancelled })
+                all += try s.listRecordings(year: c.year!, month: c.month!, day: c.day!)
+            } catch {
+                Diag.log("bulk list \(c.year!)-\(c.month!)-\(c.day!) failed: \(error)")
+            }
+            day = cal.date(byAdding: .day, value: 1, to: day) ?? last.addingTimeInterval(1)
+        }
+        if bulkCancelled { setBulk(.idle); return }
+        let total = all.count
+        guard total > 0 else { setBulk(.failed("No recordings found in that date range.")); return }
+
+        // 2. Download each segment in order.
+        var done = 0
+        for segment in all {
+            if bulkCancelled { break }
+            let name = "OpenV380 \(Self.fileStampFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(segment.start)))).mp4"
+            let url = folder.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { done += 1; continue } // resume-friendly
+
+            let exp = ClipExporter(config: config)
+            bulkExporter = exp
+            let label = PlaybackController.timeString(segment.start)
+            setBulk(.running(done: done, total: total, label: label, fileProgress: 0))
+            exp.export(segment, from: segment.start, to: segment.end, url: url,
+                       progress: { p in self.setBulk(.running(done: done, total: total, label: label, fileProgress: p)) },
+                       completion: { _ in })
+            // export() blocks until the file is finished, so it's safe to continue here.
+            done += 1
+        }
+        bulkExporter = nil
+        if bulkCancelled { setBulk(.idle) } else { setBulk(.finished(count: done, folder: folder)) }
+    }
 
     private func stopThread() {
         lock.lock()

@@ -13,20 +13,22 @@ so it works **from anywhere with an internet connection**, not just on your home
 
 ## Features
 
-- **Live view** in a floating, always-on-top window — open it with a click on the menu
-  bar icon or the global shortcut **⌃⌥V**.
-- **SD-card recordings** — a 24-hour timeline (motion / alarm / normal colour-coded),
-  clip list, seek, and **1×–32×** playback (16×/32× scan by keyframes).
-- **Download a clip** — save any part of a recording (15s / 30s / 1m / 5m from the current
-  position, or to the end) to a standard **.mp4**. No re-encoding: the camera's H.264/H.265
-  is copied through, so it's fast and lossless.
-- **Digital zoom & pan** on both live and recordings — pinch or scroll to zoom, drag to
-  pan, double-click to reset.
-- **PTZ** (pan/tilt) with a press-and-hold d-pad, for cameras that have motors.
-- **Camera light** (white LED / floodlight) toggle.
-- **Mute / unmute** live audio (off by default); detects and silences undecodable audio.
-- **Credentials stored in the macOS Keychain** — nothing is written to disk in plaintext,
-  and video is never saved to disk (it streams into memory only).
+- ✅ **Live view** in a floating, always-on-top window — one click on the menu-bar icon, or the global shortcut **⌃⌥V**
+- ✅ **SD-card recordings** — a 24-hour timeline (motion / alarm / normal, colour-coded), clip list, and seek
+- ✅ **Fast playback** — **1×–32×** (16×/32× scan by keyframes)
+- ✅ **Download a clip** as a standard **.mp4** — 15s / 30s / 1m / 5m, a **custom length** (decimals like 2.5 min), or to the end. No re-encoding, so it's fast and lossless
+- ✅ **Bulk download a date range** — every recording across the dates you pick, saved as individual `.mp4` files into a folder (resumable — it skips files already downloaded)
+- ✅ **Digital zoom & pan** on live and recordings — pinch/scroll to zoom, drag to pan, double-click to reset
+- ✅ **PTZ** (pan/tilt) via a press-and-hold d-pad, for cameras with motors
+- ✅ **Camera light** (white LED / floodlight) toggle
+- ✅ **Mute / unmute** live audio (off by default)
+- ✅ **Works from anywhere** — connects through V380's cloud with just your Device ID + password, no LAN requirement, no RTSP/ONVIF setup, no account
+- ✅ **Private by design** — credentials stay in the macOS Keychain; video streams to memory and is never written to disk (except clips you explicitly export)
+
+Roadmap:
+
+- ⬜ Multi-camera grid (monitor several cameras at once)
+- ⬜ Live audio (currently encrypted with an uncracked key on the tested model)
 
 ## Download
 
