@@ -85,7 +85,7 @@ public final class V380Session {
     public let config: CameraConfig
     var socket: TCPSocket?
     var ticket: UInt32 = 0
-    private var sessionId: UInt32 = 0
+    var sessionId: UInt32 = 0
     var deviceVersion: UInt8 = 0
     private var communicationVersion: UInt16 = 0
     var mediaKey = [UInt8](repeating: 0, count: 16)

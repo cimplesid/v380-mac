@@ -32,6 +32,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>NSHighResolutionCapable</key><true/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>OpenV380 connects to your V380 camera to show its live feed and recordings.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>OpenV380 sends your voice to the camera's speaker while Talk is on.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSExceptionDomains</key>
@@ -47,9 +49,21 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+# The hardened runtime blocks the microphone unless the app declares it.
+ENTITLEMENTS="build/OpenV380.entitlements"
+cat > "$ENTITLEMENTS" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key><true/>
+</dict>
+</plist>
+PLIST
+
 if [ "$MODE" = "release" ]; then
     # Ad-hoc signature: no Apple Developer identity is embedded, so nothing personal ships in the binary.
-    codesign --force --deep --options runtime --sign - "$APP"
+    codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS" --sign - "$APP"
     ZIP="build/OpenV380-$VERSION.zip"
     rm -f "$ZIP"
     ditto -c -k --keepParent "$APP" "$ZIP"
@@ -58,7 +72,7 @@ if [ "$MODE" = "release" ]; then
 else
     # A stable Apple Development identity keeps the Keychain item trusted across local rebuilds.
     IDENTITY=$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2; exit}')
-    codesign --force --deep --options runtime --sign "${IDENTITY:--}" "$APP"
+    codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS" --sign "${IDENTITY:--}" "$APP"
     mkdir -p ~/Applications
     rm -rf ~/Applications/OpenV380.app
     cp -R "$APP" ~/Applications/OpenV380.app

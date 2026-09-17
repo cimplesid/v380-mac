@@ -79,6 +79,12 @@ final class TCPSocket {
         }
     }
 
+    /// Bounds how long `write` may block when the peer stops reading.
+    func setSendTimeout(_ timeout: TimeInterval) {
+        var tv = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - Double(Int(timeout))) * 1_000_000))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
     /// Waits up to `timeout` for data; returns false on timeout.
     func waitReadable(_ timeout: TimeInterval) throws -> Bool {
         var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)

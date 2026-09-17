@@ -61,6 +61,7 @@ final class AudioPlayer {
     private var adpcm = IMAADPCMDecoder()
     private var running = false
     private var _muted = true
+    private var _suppressed = false
 
     // Undecodable (encrypted) audio decodes to full-scale noise; detect that and stay silent.
     private var railedSamples = 0
@@ -87,6 +88,12 @@ final class AudioPlayer {
         }
     }
 
+    /// Drops incoming audio without changing the mute setting (used while talking, to avoid echo).
+    var suppressed: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _suppressed }
+        set { lock.lock(); _suppressed = newValue; lock.unlock() }
+    }
+
     /// Call when a new stream starts (the ADPCM decoder carries state that must not cross streams).
     func resetStream() {
         lock.lock()
@@ -100,7 +107,7 @@ final class AudioPlayer {
     /// `frame.payload` is already decrypted by the protocol layer.
     func enqueue(_ frame: MediaFrame, session: V380Session) {
         lock.lock()
-        guard !_muted, !noise, let codec = frame.audioCodec else { lock.unlock(); return }
+        guard !_muted, !_suppressed, !noise, let codec = frame.audioCodec else { lock.unlock(); return }
         // Drop audio rather than fall ever further behind the picture on a slow link.
         if queuedSeconds > 0.8 { lock.unlock(); return }
 

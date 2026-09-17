@@ -15,12 +15,26 @@ final class LiveController: ObservableObject {
     @Published private(set) var fps = 0
     @Published private(set) var videoSize: CGSize?
     @Published private(set) var muted = true
+    @Published private(set) var talk: TalkState = .off
+
+    enum TalkState: Equatable {
+        case off
+        case connecting
+        case on
+        case failed(String)
+    }
 
     let renderer = VideoRenderer()
     let audio = AudioPlayer()
     private var session: V380Session?
     private var generation = 0
     private let lock = NSLock()
+
+    private let microphone = MicrophoneCapture()
+    private let talkQueue = DispatchQueue(label: "openv380.talk")
+    private var talkChannel: V380TalkChannel? // only touched on talkQueue
+    private var talkGeneration = 0            // main queue
+    private var talkBacklog = 0               // guarded by lock
 
     var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return session != nil }
 
@@ -36,6 +50,7 @@ final class LiveController: ObservableObject {
     }
 
     func stop() {
+        stopTalk()
         lock.lock()
         generation += 1
         let s = session; session = nil
@@ -60,6 +75,97 @@ final class LiveController: ObservableObject {
     func ptz(_ direction: V380Session.PTZ?) {
         lock.lock(); let s = session; lock.unlock()
         if let direction { s?.ptzMove(direction) } else { s?.ptzStop() }
+    }
+
+    var isTalking: Bool { talk == .on || talk == .connecting }
+
+    /// Starts or stops sending the Mac's microphone to the camera's speaker. Main queue only.
+    func setTalking(_ on: Bool) {
+        on ? startTalk() : stopTalk()
+    }
+
+    private func startTalk() {
+        guard state == .live, talk != .connecting, talk != .on else { return }
+        lock.lock(); let s = session; lock.unlock()
+        guard let s else { return }
+        talkGeneration += 1
+        let gen = talkGeneration
+        talk = .connecting
+
+        MicrophoneCapture.requestAccess { [weak self] granted in
+            guard let self, gen == self.talkGeneration else { return }
+            guard granted else {
+                self.talk = .failed("Microphone access is off. Allow OpenV380 in System Settings → Privacy & Security → Microphone.")
+                return
+            }
+            self.talkQueue.async {
+                do {
+                    let channel = try s.openTalk()
+                    DispatchQueue.main.async { self.talkOpened(channel, gen: gen) }
+                } catch {
+                    Diag.log("talk open failed: \(error)")
+                    DispatchQueue.main.async {
+                        guard gen == self.talkGeneration else { return }
+                        self.talk = .failed("The camera didn't accept talk (\(error)).")
+                    }
+                }
+            }
+        }
+    }
+
+    private func talkOpened(_ channel: V380TalkChannel, gen: Int) {
+        guard gen == talkGeneration, state == .live else {
+            talkQueue.async { channel.close() }
+            return
+        }
+        talkQueue.async { self.talkChannel = channel }
+        do {
+            try microphone.start(blockSize: V380TalkChannel.samplesPerBlock) { [weak self] block in
+                guard let self else { return }
+                // On a slow link, drop audio rather than let the voice fall further and further behind.
+                self.lock.lock()
+                let backlog = self.talkBacklog
+                if backlog < 16 { self.talkBacklog += 1 }
+                self.lock.unlock()
+                guard backlog < 16 else { return }
+                self.talkQueue.async {
+                    defer { self.lock.lock(); self.talkBacklog -= 1; self.lock.unlock() }
+                    guard let channel = self.talkChannel else { return }
+                    do {
+                        try channel.send(block)
+                    } catch {
+                        Diag.log("talk send failed: \(error)")
+                        self.talkChannel = nil
+                        channel.close()
+                        DispatchQueue.main.async { self.talkEnded(gen: gen, message: "Talk connection dropped.") }
+                    }
+                }
+            }
+        } catch {
+            Diag.log("microphone failed: \(error)")
+            talkEnded(gen: gen, message: "Couldn't start the microphone.")
+            return
+        }
+        // The camera's microphone would pick up its own speaker; the V380 app pauses playback the same way.
+        audio.suppressed = true
+        talk = .on
+    }
+
+    private func talkEnded(gen: Int, message: String) {
+        guard gen == talkGeneration else { return }
+        stopTalk()
+        talk = .failed(message)
+    }
+
+    private func stopTalk() {
+        talkGeneration += 1
+        microphone.stop()
+        talkQueue.async {
+            self.talkChannel?.close()
+            self.talkChannel = nil
+        }
+        audio.suppressed = false
+        if talk != .off { talk = .off }
     }
 
     private func current(_ gen: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return gen == generation }
@@ -124,6 +230,7 @@ final class LiveController: ObservableObject {
             } catch {
                 // Offline / 1002 / dropped stream: keep retrying so it reconnects on its own.
                 guard current(gen) else { break }
+                DispatchQueue.main.async { if self.current(gen) { self.stopTalk() } }
                 attempt += 1
                 Diag.log("live connection error: \(error)")
                 setState(.connecting(Self.friendlyMessage(error, attempt: attempt)), gen: gen)

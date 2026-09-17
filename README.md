@@ -22,6 +22,7 @@ so it works **from anywhere with an internet connection**, not just on your home
 - ✅ **PTZ** (pan/tilt) via a press-and-hold d-pad, for cameras with motors
 - ✅ **Camera light** (white LED / floodlight) toggle
 - ✅ **Mute / unmute** live audio (off by default)
+- ✅ **Talk through the camera** — two-way audio like V380 Pro's talk button: click the mic (or press **T**) and your Mac's microphone plays on the camera's speaker
 - ✅ **Works from anywhere** — connects through V380's cloud with just your Device ID + password, no LAN requirement, no RTSP/ONVIF setup, no account
 - ✅ **Private by design** — credentials stay in the macOS Keychain; video streams to memory and is never written to disk (except clips you explicitly export)
 
@@ -81,6 +82,11 @@ Highlights, in case they help the next person:
 - **Recordings:** the "segment" search/playback protocol (`361`/`363`), including the cloud
   (MR-server) command layouts and the relay's `2000` keep-alive frames.
 - **Controls:** PTZ, light, etc. are 16-byte control packets on the live stream socket.
+- **Talk (two-way audio):** a second relay socket logs in with command `377` (reply `477`/`1000`),
+  reusing the live session's ticket. Microphone audio goes out as 8 kHz IMA-ADPCM blocks
+  (505 samples → 256 bytes) in `1013` packets, AES-encrypted with the session key on newer
+  firmware, with a `188` keep-alive every 3 s. Layouts follow the current V380 Pro app's
+  native library.
 
 ### A note on audio
 

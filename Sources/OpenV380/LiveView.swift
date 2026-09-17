@@ -32,6 +32,7 @@ struct CameraView: View {
         .background(KeyCatcher { key in
             switch key {
             case "m": model.setMuted(!model.muted); return true
+            case "t" where model.mode == .live: model.live.setTalking(!model.live.isTalking); return true
             case " " where model.mode == .recordings: model.playback.togglePause(); return true
             default: return false
             }
@@ -62,6 +63,28 @@ struct MuteButton: View {
     }
 }
 
+/// Sends the Mac's microphone to the camera's speaker, like the talk button in V380 Pro.
+struct TalkButton: View {
+    @ObservedObject var live: LiveController
+
+    var body: some View {
+        Button { live.setTalking(!live.isTalking) } label: {
+            Group {
+                if live.talk == .connecting {
+                    ProgressView().controlSize(.mini).tint(.white)
+                } else {
+                    Image(systemName: live.talk == .on ? "mic.fill" : "mic")
+                }
+            }
+            .frame(width: 22, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(live.talk == .on ? .red : .white)
+        .disabled(live.state != .live)
+        .help(live.isTalking ? "Stop talking (T)" : "Talk through the camera's speaker (T)")
+    }
+}
+
 struct LiveView: View {
     @ObservedObject var live: LiveController
     @ObservedObject var model: AppModel
@@ -75,6 +98,7 @@ struct LiveView: View {
     @State private var zoom: CGFloat = 1
     @State private var torchOn = false
     @State private var showPTZ = false
+    @State private var talkNotice: String?
 
     var body: some View {
         ZStack {
@@ -104,6 +128,12 @@ struct LiveView: View {
                     Spacer()
                 }
                 Spacer()
+                if let talkNotice {
+                    Text(talkNotice).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.black.opacity(0.7), in: Capsule())
+                        .transition(.opacity)
+                }
                 HStack(alignment: .bottom) {
                     if showPTZ, live.state == .live {
                         PTZPad { live.ptz($0) }.transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -113,14 +143,33 @@ struct LiveView: View {
                 HStack(spacing: 8) {
                     if hovering { controls.transition(.opacity) }
                     Spacer()
-                    MuteButton(model: model)
-                        .padding(6)
-                        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
+                    HStack(spacing: 4) {
+                        TalkButton(live: live)
+                        MuteButton(model: model)
+                    }
+                    .padding(6)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
                 }
             }
             .padding(10)
         }
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
+        .onChange(of: live.talk) { talk in
+            let message: String?
+            switch talk {
+            case .on: message = "Talking — camera sound is paused"
+            case .failed(let text): message = text
+            default: message = nil
+            }
+            withAnimation(.easeOut(duration: 0.15)) { talkNotice = message }
+        }
+        .task(id: talkNotice) {
+            // Errors fade on their own; the "Talking" notice stays until talk stops.
+            guard talkNotice != nil, live.talk != .on else { return }
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { talkNotice = nil }
+        }
     }
 
     private var statusPill: some View {

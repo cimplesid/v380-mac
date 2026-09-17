@@ -1,10 +1,11 @@
 import Foundation
 import V380
 
-// Usage: v380probe <deviceId> <password> [seconds=10] [out=probe.h26x] [--sd]
+// Usage: v380probe <deviceId> <password> [seconds=10] [out=probe.h26x] [--sd] [--talk]
+// --talk plays a short chime on the camera's speaker instead of recording video.
 let args = CommandLine.arguments
 guard args.count >= 3, let deviceId = UInt32(args[1]) else {
-    FileHandle.standardError.write("usage: v380probe <deviceId> <password> [seconds] [outfile] [--sd]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: v380probe <deviceId> <password> [seconds] [outfile] [--sd] [--talk]\n".data(using: .utf8)!)
     exit(2)
 }
 let seconds = args.count > 3 ? Double(args[3]) ?? 10 : 10
@@ -13,6 +14,36 @@ let config = CameraConfig(deviceId: deviceId, password: args[2], hd: !args.conta
 
 let session = V380Session(config: config)
 session.log = { print($0) }
+
+if args.contains("--talk") {
+    do {
+        try session.authenticateAnywhere()
+        let talk = try session.openTalk()
+        print("[talk] channel open, sending 3 s of audio")
+        // Alternating 660 Hz / 880 Hz, 0.5 s each, paced in real time like a microphone.
+        let block = V380TalkChannel.samplesPerBlock
+        let started = Date()
+        var n = 0
+        while n < 24000 {
+            let samples = (0..<block).map { i -> Int16 in
+                let t = Double(n + i) / 8000
+                let freq = Int(t * 2) % 2 == 0 ? 660.0 : 880.0
+                return Int16(sin(2 * .pi * freq * t) * 12000)
+            }
+            try talk.send(samples)
+            n += block
+            let due = started.addingTimeInterval(Double(n) / 8000)
+            if due > Date() { Thread.sleep(until: due) }
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+        talk.close()
+        print("[talk] done")
+    } catch {
+        print("[error] \(error)")
+        exit(1)
+    }
+    exit(0)
+}
 
 FileManager.default.createFile(atPath: outPath, contents: nil)
 let out = FileHandle(forWritingAtPath: outPath)!
