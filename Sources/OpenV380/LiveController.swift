@@ -36,10 +36,12 @@ final class LiveController: ObservableObject {
     private var talkGeneration = 0            // main queue
     private var talkBacklog = 0               // guarded by lock
 
-    var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return session != nil }
+    /// The config of the stream that was last started and not stopped since. Main queue only.
+    private(set) var activeConfig: CameraConfig?
 
     func start(_ config: CameraConfig) {
         stop()
+        activeConfig = config
         lock.lock(); generation += 1; let gen = generation; lock.unlock()
         setState(.connecting("Connecting…"), gen: gen)
 
@@ -51,6 +53,7 @@ final class LiveController: ObservableObject {
 
     func stop() {
         stopTalk()
+        activeConfig = nil
         lock.lock()
         generation += 1
         let s = session; session = nil

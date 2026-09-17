@@ -50,7 +50,9 @@ final class PlaybackController: ObservableObject {
 
     let renderer = VideoRenderer()
     let audio = AudioPlayer()
-    var config: CameraConfig?
+    private(set) var config: CameraConfig?
+    /// Added to downloaded file names when several cameras are set up, so their files don't collide.
+    var fileLabel: String?
     private var exporter: ClipExporter?
 
     private let lock = NSLock()
@@ -79,6 +81,25 @@ final class PlaybackController: ObservableObject {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!
         return UInt32(utc.date(from: c)?.timeIntervalSince1970 ?? 0)
+    }
+
+    /// Points playback at a camera. Switching to a different device drops the previous one's list and playback.
+    func setCamera(_ newConfig: CameraConfig?) {
+        guard newConfig != config else { return }
+        let sameDevice = newConfig?.deviceId == config?.deviceId
+        config = newConfig
+        guard !sameDevice else { return }
+        stop()
+        lock.lock(); listGeneration += 1; lock.unlock()
+        segments = []
+        current = nil
+        listState = .idle
+    }
+
+    /// "OpenV380 [label ]<stamp>.mp4" — the stamp is filename-safe camera wall-clock time.
+    func fileName(stamp: String) -> String {
+        let label = fileLabel.map { $0.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + " " } ?? ""
+        return "OpenV380 \(label)\(stamp).mp4"
     }
 
     // MARK: - Listing
@@ -283,7 +304,8 @@ final class PlaybackController: ObservableObject {
         var done = 0
         for segment in all {
             if bulkCancelled { break }
-            let name = "OpenV380 \(Self.fileStampFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(segment.start)))).mp4"
+            let name = fileName(
+                stamp: Self.fileStampFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(segment.start))))
             let url = folder.appendingPathComponent(name)
             if FileManager.default.fileExists(atPath: url.path) { done += 1; continue } // resume-friendly
 

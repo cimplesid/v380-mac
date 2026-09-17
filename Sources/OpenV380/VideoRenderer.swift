@@ -284,16 +284,58 @@ final class VideoRenderer {
     }
 }
 
+/// Holds a renderer's video view. A camera's video moves between surfaces (its tab ↔ a grid tile): the surface
+/// that appeared last owns it, and a surface being torn down never takes it back from another.
+final class VideoHostView: NSView {
+    let content: VideoLayerView
+
+    init(content: VideoLayerView) {
+        self.content = content
+        super.init(frame: .zero)
+        attach()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { attach() }
+    }
+
+    override func layout() {
+        super.layout()
+        guard content.superview === self, content.frame != bounds else { return }
+        content.frame = bounds
+        content.needsLayout = true
+    }
+
+    private func attach() {
+        guard content.superview !== self else { return }
+        content.removeFromSuperview()
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+    }
+
+    func detachIfOwner() {
+        if content.superview === self { content.removeFromSuperview() }
+    }
+}
+
 struct VideoSurface: NSViewRepresentable {
     let renderer: VideoRenderer
     var onZoom: ((CGFloat) -> Void)? = nil
 
-    func makeNSView(context: Context) -> VideoLayerView {
+    func makeNSView(context: Context) -> VideoHostView {
         renderer.view.onZoomChange = onZoom
-        return renderer.view
+        return VideoHostView(content: renderer.view)
     }
 
-    func updateNSView(_ nsView: VideoLayerView, context: Context) {
-        nsView.onZoomChange = onZoom
+    func updateNSView(_ nsView: VideoHostView, context: Context) {
+        nsView.content.onZoomChange = onZoom
+    }
+
+    static func dismantleNSView(_ nsView: VideoHostView, coordinator: ()) {
+        nsView.detachIfOwner()
     }
 }

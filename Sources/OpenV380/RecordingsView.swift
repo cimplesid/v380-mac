@@ -6,6 +6,7 @@ import V380
 struct RecordingsView: View {
     @ObservedObject var playback: PlaybackController
     @ObservedObject var model: AppModel
+    var topInset: CGFloat = 0
     @State private var showList = false
     @State private var zoom: CGFloat = 1
     @State private var showBulkSheet = false
@@ -23,7 +24,7 @@ struct RecordingsView: View {
                     ZoomBadge(zoom: zoom) { playback.renderer.view.resetZoom() }
                     Spacer()
                 }
-                .padding(.top, 8).padding(.leading, 10)
+                .padding(.top, 8 + topInset).padding(.leading, 10)
 
                 HStack(alignment: .top, spacing: 0) {
                     if showList {
@@ -159,7 +160,8 @@ struct RecordingsView: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mpeg4Movie]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "OpenV380 \(PlaybackController.timeString(start).replacingOccurrences(of: ":", with: "-")).mp4"
+        panel.nameFieldStringValue = playback.fileName(
+            stamp: PlaybackController.timeString(start).replacingOccurrences(of: ":", with: "-"))
         if panel.runModal() == .OK, let url = panel.url {
             playback.exportClip(from: start, duration: duration, to: url)
         }

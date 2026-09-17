@@ -136,11 +136,19 @@ public final class V380Session {
         var key: String { "h\(version)-\(username.rawValue)-\(password.rawValue)" }
     }
 
-    private static let variantKey = "v380.loginVariant"
+    /// Connection hints are remembered per device, since cameras can differ in firmware and relay.
+    /// Before multi-camera support they were global; those are still used as a first guess.
+    private func hint(_ name: String) -> String? {
+        UserDefaults.standard.string(forKey: "\(name).\(config.deviceId)") ?? UserDefaults.standard.string(forKey: name)
+    }
+
+    private func rememberHint(_ name: String, _ value: String) {
+        UserDefaults.standard.set(value, forKey: "\(name).\(config.deviceId)")
+    }
 
     /// Logs in, starting with the variant that worked last time.
     public func authenticate() throws {
-        let remembered = UserDefaults.standard.string(forKey: Self.variantKey)
+        let remembered = hint("v380.loginVariant")
         var versions: [UInt8] = [31, 2]
         var usernames = UsernameChoice.allCases
         var passwords = PasswordEncoding.allCases
@@ -159,7 +167,7 @@ public final class V380Session {
                     let variant = LoginVariant(version: version, username: username, password: password)
                     do {
                         try authenticate(variant)
-                        if variant.key != remembered { UserDefaults.standard.set(variant.key, forKey: Self.variantKey) }
+                        if variant.key != remembered { rememberHint("v380.loginVariant", variant.key) }
                         return
                     } catch V380Error.wrongUsername {
                         lastError = V380Error.wrongUsername
@@ -188,8 +196,6 @@ public final class V380Session {
         throw lastError
     }
 
-    private static let relayKey = "v380.relay"
-
     /// Logs in through a V380 cloud relay (the same path the phone uses off-LAN).
     /// On success `relayIP` is set so later sockets reuse it. `shouldStop` bails out between attempts.
     public func authenticateAnywhere(shouldStop: () -> Bool = { false }) throws {
@@ -200,7 +206,7 @@ public final class V380Session {
             relayIP = ip
             do {
                 try authenticate()
-                UserDefaults.standard.set(ip, forKey: Self.relayKey)
+                rememberHint("v380.relay", ip)
                 log("[connect] using cloud relay \(ip)")
                 return true
             } catch let e as V380Error where e.isCredentialError {
@@ -212,7 +218,7 @@ public final class V380Session {
         }
 
         // Try the relay that worked last time first (avoids a dispatch round-trip).
-        let cached = UserDefaults.standard.string(forKey: Self.relayKey)
+        let cached = hint("v380.relay")
         if let cached, try attempt(cached) { return }
         // Then fresh relays from the dispatch server.
         if !shouldStop() {

@@ -1,42 +1,99 @@
 import SwiftUI
 import V380
 
-/// Root of the camera window: live view or recordings, with the controls both share.
+/// Root of the camera window: a tab per camera (when there are several), then live view, the live grid,
+/// or recordings, with the controls they share.
 struct CameraView: View {
     @ObservedObject var model: AppModel
-    var onQualityChange: (Bool) -> Void
     var onPinChange: (Bool) -> Void
     var onSettings: () -> Void
+
+    /// Room for the camera tabs above each view's own top controls.
+    private var topInset: CGFloat { model.cameras.count > 1 ? 34 : 0 }
 
     var body: some View {
         ZStack(alignment: .top) {
             Color.black
-            switch model.mode {
-            case .live:
-                LiveView(live: model.live, model: model, onQualityChange: onQualityChange,
-                         onPinChange: onPinChange, onSettings: onSettings)
-            case .recordings:
-                RecordingsView(playback: model.playback, model: model)
-            }
+            content
 
-            HStack {
-                Spacer()
+            HStack(spacing: 8) {
+                if model.cameras.count > 1 { CameraTabs(model: model) } else { Spacer() }
                 Picker("", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
                     Text("Live").tag(AppModel.Mode.live)
                     Text("Recordings").tag(AppModel.Mode.recordings)
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 170)
             }
-            .padding(.top, 8).padding(.trailing, 10)
+            .padding(.top, 8).padding(.horizontal, 10)
         }
         .background(KeyCatcher { key in
             switch key {
             case "m": model.setMuted(!model.muted); return true
-            case "t" where model.mode == .live: model.live.setTalking(!model.live.isTalking); return true
+            case "t" where model.mode == .live:
+                if let live = model.selectedLive { live.setTalking(!live.isTalking) }
+                return true
             case " " where model.mode == .recordings: model.playback.togglePause(); return true
-            default: return false
+            case "0" where model.cameras.count > 1: model.select(.grid); return true
+            default:
+                // 1–9 pick a camera by its tab position.
+                guard model.cameras.count > 1, let n = Int(key), (1...min(9, model.cameras.count)).contains(n) else { return false }
+                model.select(.camera(model.cameras[n - 1].id))
+                return true
             }
         })
+    }
+
+    @ViewBuilder private var content: some View {
+        switch (model.mode, model.selectedCamera) {
+        case (.live, let camera?):
+            LiveView(live: model.liveController(for: camera.id), model: model, camera: camera, topInset: topInset,
+                     onPinChange: onPinChange, onSettings: onSettings)
+                .id(camera.id) // zoom, light and PTZ state belong to one camera
+        case (.live, nil):
+            LiveGrid(model: model, topInset: topInset, onPinChange: onPinChange, onSettings: onSettings)
+        case (.recordings, _):
+            RecordingsView(playback: model.playback, model: model, topInset: topInset)
+                .id(model.selectedCamera?.id)
+        }
+    }
+}
+
+/// "All" plus one tab per camera. Keys 0 (all) and 1–9 switch too.
+struct CameraTabs: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                if model.mode == .live {
+                    tab("All", symbol: "square.grid.2x2", selected: model.selection == .grid,
+                        help: "Watch every camera at once (0)") { model.select(.grid) }
+                }
+                ForEach(Array(model.cameras.enumerated()), id: \.element.id) { index, camera in
+                    tab(camera.name, symbol: nil, selected: model.selection == .camera(camera.id),
+                        help: index < 9 ? "\(camera.name) (\(index + 1))" : camera.name) {
+                        model.select(.camera(camera.id))
+                    }
+                }
+            }
+        }
+        .frame(height: 24)
+    }
+
+    private func tab(_ title: String, symbol: String?, selected: Bool, help: String,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol) }
+                Text(title).lineLimit(1)
+            }
+            .font(.callout.weight(selected ? .semibold : .regular))
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .foregroundStyle(selected ? Color.black : Color.white)
+            .background(selected ? Color.white : Color.black.opacity(0.55), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
@@ -88,11 +145,11 @@ struct TalkButton: View {
 struct LiveView: View {
     @ObservedObject var live: LiveController
     @ObservedObject var model: AppModel
-    @AppStorage("hd") private var hd = true
+    let camera: SavedCamera
+    var topInset: CGFloat = 0
     @AppStorage("pinned") private var pinned = true
     @State private var hovering = false
 
-    var onQualityChange: (Bool) -> Void
     var onPinChange: (Bool) -> Void
     var onSettings: () -> Void
     @State private var zoom: CGFloat = 1
@@ -152,6 +209,7 @@ struct LiveView: View {
                 }
             }
             .padding(10)
+            .padding(.top, topInset)
         }
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
         .onChange(of: live.talk) { talk in
@@ -188,7 +246,7 @@ struct LiveView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Picker("", selection: Binding(get: { hd }, set: { hd = $0; onQualityChange($0) })) {
+            Picker("", selection: Binding(get: { camera.config.hd }, set: { model.setHD($0) })) {
                 Text("HD").tag(true)
                 Text("SD").tag(false)
             }

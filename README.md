@@ -14,6 +14,7 @@ so it works **from anywhere with an internet connection**, not just on your home
 ## Features
 
 - ✅ **Live view** in a floating, always-on-top window — one click on the menu-bar icon, or the global shortcut **⌃⌥V**
+- ✅ **Multiple cameras** — add as many as you like in Settings, switch between them with tabs (or keys **1–9**), and watch them all at once in the **All** grid (key **0**); double-click a tile to open that camera
 - ✅ **SD-card recordings** — a 24-hour timeline (motion / alarm / normal, colour-coded), clip list, and seek
 - ✅ **Fast playback** — **1×–32×** (16×/32× scan by keyframes)
 - ✅ **Download a clip** as a standard **.mp4** — 15s / 30s / 1m / 5m, a **custom length** (decimals like 2.5 min), or to the end. No re-encoding, so it's fast and lossless
@@ -28,7 +29,6 @@ so it works **from anywhere with an internet connection**, not just on your home
 
 Roadmap:
 
-- ⬜ Multi-camera grid (monitor several cameras at once)
 - ⬜ Live audio (currently encrypted with an uncracked key on the tested model)
 
 ## Download
@@ -61,7 +61,8 @@ To build a distributable, ad-hoc-signed zip for a GitHub release instead:
 ```
 
 On first launch, enter your **Device ID** and **device password**. They're saved to the
-Keychain; you never enter them again.
+Keychain; you never enter them again. To add more cameras, open **Settings → Cameras → Add Camera**
+(or **Add Camera…** in the menu-bar icon's right-click menu).
 
 > If macOS blocks the first launch because it isn't notarized, right-click the app →
 > **Open**, or allow it under **System Settings → Privacy & Security**.

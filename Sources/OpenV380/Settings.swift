@@ -2,38 +2,59 @@ import Foundation
 import Security
 import V380
 
-/// Camera settings (IP, device ID, username, password) live in one macOS Keychain item.
+/// A camera the user has added. The id only exists on this Mac.
+struct SavedCamera: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var config: CameraConfig
+}
+
+/// Camera logins (name, device ID, username, password) live in one macOS Keychain item.
 /// The item's access list trusts only the signed OpenV380 app; any other program reading it
 /// triggers a macOS prompt that the user must approve.
 enum SettingsStore {
     private static let service = "com.openv380.mac"
-    private static let account = "camera"
+    private static let account = "cameras"
+    /// Before multi-camera support: a single CameraConfig.
+    private static let legacyAccount = "camera"
 
-    private static var baseQuery: [String: Any] {
+    private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
     }
 
-    static func load() -> CameraConfig? {
-        var query = baseQuery
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
+    private static func read(_ account: String) -> Data? {
+        var q = query(account)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else {
-            return nil
-        }
-        return try? JSONDecoder().decode(CameraConfig.self, from: data)
+        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
     }
 
-    static func save(_ config: CameraConfig) throws {
-        let data = try JSONEncoder().encode(config)
+    static func loadCameras() -> [SavedCamera] {
+        if let data = read(account) {
+            return (try? JSONDecoder().decode([SavedCamera].self, from: data)) ?? []
+        }
+        // Carry the single camera from earlier versions over to the list.
+        guard let data = read(legacyAccount), let config = try? JSONDecoder().decode(CameraConfig.self, from: data) else {
+            return []
+        }
+        let cameras = [SavedCamera(name: "Camera 1", config: config)]
+        if (try? saveCameras(cameras)) != nil { SecItemDelete(query(legacyAccount) as CFDictionary) }
+        return cameras
+    }
+
+    static func saveCameras(_ cameras: [SavedCamera]) throws {
+        guard !cameras.isEmpty else { deleteAll(); return }
+        let data = try JSONEncoder().encode(cameras)
         let update: [String: Any] = [kSecValueData as String: data]
-        var status = SecItemUpdate(baseQuery as CFDictionary, update as CFDictionary)
+        var status = SecItemUpdate(query(account) as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
-            var add = baseQuery
+            var add = query(account)
             add[kSecValueData as String] = data
-            add[kSecAttrLabel as String] = "OpenV380 camera login"
+            add[kSecAttrLabel as String] = "OpenV380 camera logins"
             add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
             status = SecItemAdd(add as CFDictionary, nil)
         }
@@ -44,8 +65,9 @@ enum SettingsStore {
         }
     }
 
-    static func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
+    static func deleteAll() {
+        SecItemDelete(query(account) as CFDictionary)
+        SecItemDelete(query(legacyAccount) as CFDictionary)
     }
 
     /// OpenV380 never writes video to disk — recordings stream into memory. This only clears the
@@ -59,8 +81,9 @@ enum SettingsStore {
             freed += directorySize(caches)
             try? fm.removeItem(at: caches)
         }
-        // Cached connection hints — dropping them just means a fresh relay lookup next connect.
-        for key in ["v380.relay", "v380.endpoint", "v380.loginVariant"] {
+        // Cached connection hints (global and per device) — dropping them just means a fresh relay lookup next connect.
+        for key in UserDefaults.standard.dictionaryRepresentation().keys
+        where ["v380.relay", "v380.endpoint", "v380.loginVariant"].contains(where: { key.hasPrefix($0) }) {
             UserDefaults.standard.removeObject(forKey: key)
         }
         return freed
